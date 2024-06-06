@@ -3,13 +3,13 @@ home: true
 actionText: Розпочати →
 actionLink: /intro/
 
-footer: "ECL 2.0 Licensed | Copyright © 2024 Yehor Telnov"
+footer: "ECL 2.0 Licensed | Copyright © 2024 Papko Maxim"
 ---
 
 
 **Виконав:** 
 
-*студент 2-го курсу, групи ІО-22:* <span padding-right:5em></span> **Тельнов Єгор <a href="https://t.me/dead_vnutri" target="_blank"> Telegram </a>**
+*студент 2-го курсу, групи ІО-22:* <span padding-right:5em></span> **Папко Максим <a href="https://t.me/dxnyfxntom" target="_blank"> Telegram </a>**
 
 **Керівник**
 
