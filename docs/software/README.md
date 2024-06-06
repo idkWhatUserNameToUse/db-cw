@@ -123,150 +123,296 @@ ALTER TABLE "partipicants" ADD CONSTRAINT "partipicants_task_id_fkey" FOREIGN KE
 ```
 
 ## RESTfull система управління проектами
-controller.py
-```python
 
-from flask import Flask
-from flask import request, jsonify
-from model import Users
+### Схема бази даних (ORM Prisma)
 
-app = Flask(__name__)
+```
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-users = Users()
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
-@app.route("/users", methods=["GET"])
-def get_all_users():
-    result = users.get_all_users()
-    return jsonify(result), 200
+generator client {
+  provider = "prisma-client-js"
+}
 
-@app.route("/users/<id>", methods=["GET"])
-def get_user(id):
-    result = users.get_user(id)
-    return jsonify(result), 200
-
-@app.route("/users", methods=["POST"])
-def add_user():
-    data = request.get_json()
-    result = users.add_user(data)
-    return jsonify(result), 200
-
-@app.route("/users", methods=["PATCH"])
-def update_user():
-    data = request.get_json()
-    result = users.update_user(data)
-    return jsonify(result), 200
-
-@app.route("/users/<id>", methods=["DELETE"])
-def delete_user(id):
-    result = users.delete_user(id)
-    return jsonify(result), 200
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
 
-if __name__ == "__main__":
-    app.run(debug=True)
+model User {
+  id         String      @id @default(uuid())
+  username   String      @unique
+  email      String      @unique
+  password   String
+  fullNmae   String      @map("full_name")
+  members    Member[]
+
+  @@map("users")
+}
+
+enum Status {
+  COMPLETED
+  IN_PROGRESS
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  status      Status
+  members     Member[]
+  tasks       Task[]
+
+  @@map("projects")
+}
+
+model Member {
+  id           String        @id @default(uuid())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String        @map("user_id")
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String        @map("project_id")
+  role         Role?
+  participants Partipicant[]
+
+  @@map("members")
+}
+
+model Role {
+  id       String  @id @default(uuid())
+  name     String
+  member   Member? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId String? @unique @map("member)id")
+  grants   Grant[]
+
+  @@map("roles")
+}
+
+model Grant {
+  id          String       @id @default(uuid())
+  roleId      String       @map("role_id")
+  role        Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissions Permission[]
+
+  @@map("grants")
+}
+
+model Permission {
+  id         String @id @default(uuid())
+  permission String
+  grantId    String
+  grant      Grant  @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@map("permissions")
+}
+
+model Task {
+  id           String        @id @default(uuid())
+  name         String
+  description  String
+  status       Status
+  price        String
+  deadline     DateTime
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String        @map("project_id")
+  participants Partipicant[]
+
+  @@map("tasks")
+}
+
+model Partipicant {
+  id       String @id @default(uuid())
+  name     String
+  member   Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId String @map("user_id")
+  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId   String @map("task_id")
+
+  @@map("partipicants")
+}
+```
+
+### Модуль та сервіс підключення до бази даних
+
+```ts
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit {
+  async onModuleInit() {
+    await this.$connect();
+  }
+}
+```
+
+### Модуль та контролер для отримання запитів
+
+```ts
+import { Module } from '@nestjs/common';
+import { RoleController } from './RoleController';
+import { RoleService } from './RoleService';
+import { RoleRepository } from './RoleRepository';
+import { PrismaService } from './PrismaService';
+import { RoleByIdPipe } from './RoleByIdPipe';
+
+@Module({
+  controllers: [RoleController],
+  providers: [RoleService, RoleRepository, PrismaService, RoleByIdPipe],
+})
+export class AppModule {}
 
 ```
 
-model.pu
+```ts
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { RoleService } from './RoleService';
+import { CreateRoleDto } from './CreateRoleDto';
+import { UpdateRoleDto } from './UpdateRoleDto';
+import {RoleByIdPipe} from "./RoleByIdPipe";
 
-```python
+@Controller('/roles')
+export class RoleController {
+  constructor (
+    private readonly roleService: RoleService,
+  ) {}
 
-import psycopg2 as psycopg2
+  @Post()
+  create (
+    @Body() body: CreateRoleDto,
+  ) {
+    return this.roleService.create(body);
+  }
 
+  @Get()
+  getAll () {
+    return this.roleService.getAll();
+  }
 
-class Users:
-    def __init__(self):
-        try:
-            self.connection = psycopg2.connect(
-        dbname="test",
-        user="postgres",
-        host="localhost",
-        port="5432"
-    )
-            print("Connection to database established successfully!")
-            self.cursor = self.connection.cursor()
-        except psycopg2.Error as error:
-            print("Failed to connect to the database:", str(error))
+  @Get('/:roleId')
+  getById (
+    @Param('roleId', RoleByIdPipe) roleId: string,
+  ) {
+    return this.roleService.getById(roleId);
+  }
 
-    def get_all_users(self):
-        try:
-            self.cursor.execute("SELECT * FROM users")
-            result = self.cursor.fetchall()
-            if self.cursor.rowcount == 0:
-                return {"message": "There are no users", "error": "Not Found", "status_code": 404}
-            return {"data": result, "status_code": 200}
-        except psycopg2.Error as error:
-            return {"message": str(error), "error": "Database Error", "status_code": 500}
+  @Patch('/:roleId')
+  update (
+    @Param('roleId', RoleByIdPipe) roleId: string,
+    @Body() body: UpdateRoleDto,
+  ) {
+    return this.roleService.update(roleId, body);
+  }
 
-    def get_user(self, id):
-        if not str(id).isdigit():
-            return {"message": "Invalid user id", "error": "Bad Request", "status_code": 400}
-        try:
-            self.cursor.execute("SELECT * FROM users WHERE id = %s", (id,))
-            result = self.cursor.fetchall()
-            if self.cursor.rowcount == 0:
-                return {"message": f"There is no user with id {id}", "error": "Not Found", "status_code": 404}
-            return {"data": result, "status_code": 200}
-        except psycopg2.Error as error:
-            return {"message": str(error), "error": "Database Error", "status_code": 500}
+  @Delete('/:roleId')
+  delete (
+    @Param('roleId', RoleByIdPipe) roleId: string,
+  ) {
+    return this.roleService.delete(roleId);
+  }
+}
+```
 
-    def add_user(self, data):
-        data = dict(data)
-        required_keys = {'id', 'username', 'email', 'password', 'full_name'}
-        if not required_keys.issubset(data):
-            return {"message": "Invalid or missing keys", "error": "Bad Request", "status_code": 400}
-        try:
-            query = "INSERT INTO users (id, username, email, password, full_name) VALUES (%s, %s, %s, %s, %s)"
-            values = (data['id'], data['username'], data['email'], data['password'], data['full_name'])
-            self.cursor.execute(query, values)
-            self.connection.commit()
-            if self.cursor.rowcount > 0:
-                return {"message": "User added succesfully", "status_code": 200}
-            else:
-                return {"message": "User wasn`t added to database", "error": "Not Acceptable", "status_code": 406}
-        except psycopg2.Error as error:
-            self.connection.rollback()
-            return {"message": "Add user failed: " + str(error), "error": "Database Error", "status_code": 500}
+### Сервіс для обробки запитів
 
+```ts
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from './PrismaService';
+import { Prisma } from '@prisma/client';
 
-    def update_user(self, data):
-        data = dict(data)
-        if 'id' not in data:
-            return {"message": "No user id provided", "error": "Bad Request", "status_code": 400}
-        id = data['id']
-        del data['id']
-        if not data:
-            return {"message": "No data provided", "error": "Bad Request", "status_code": 400}
-        set_clause = ', '.join([f"{key} = %s" for key in data])
-        values = list(data.values())
-        values.append(id)  # id should be appended to the end for the WHERE clause
+@Injectable()
+export class RoleRepository {
+  constructor (
+    private readonly prismaService: PrismaService,
+  ) {}
 
-        try:
-            query = f"UPDATE users SET {set_clause} WHERE id = %s::integer"  # Cast id to integer
-            self.cursor.execute(query, values)
-            self.connection.commit()
+  create (data: Prisma.RoleUncheckedCreateInput) {
+    return this.prismaService.role.create({ data });
+  }
 
-            if self.cursor.rowcount > 0:
-                return {"message": "User updated successfully", "status_code": 200}
-            else:
-                return {"message": "User wasn't updated", "error": "Not Found", "status_code": 404}
-        except psycopg2.Error as error:
-            self.connection.rollback()
-            return {"message": "User update failed: " + str(error), "error": "Database Error", "status_code": 500}
+  findMany (where: Prisma.RoleWhereInput) {
+    return this.prismaService.role.findMany({ where });
+  }
 
-    def delete_user(self, id):
-        if not str(id).isdigit():
-            return {"message": "Invalid user id", "error": "Bad Request", "status_code": 400}
-        try:
-            self.cursor.execute("DELETE FROM users WHERE id = %s", (id,))
-            self.connection.commit()
+  findById (id: string) {
+    return this.prismaService.role.findUnique({ where: { id} });
+  }
 
-            if self.cursor.rowcount > 0:
-                return {"message": "User deleted successfully", "status_code": 200}
-            else:
-                return {"message": "Nothing to delete", "error": "Not Found", "status_code": 404}
-        except Exception as error:
-            self.connection.rollback()
-            return {"message": "Delete user failed", "error": str(error), "status_code": 500}
+  updateById (id: string, data: Prisma.RoleUncheckedUpdateInput) {
+    return this.prismaService.role.update({
+      where: { id },
+      data,
+    })
+  }
 
+  deleteById (id: string) {
+    return this.prismaService.role.delete({ where: { id } });
+  }
+}
+```
+
+### DTO для створення ролі
+
+```ts
+import {IsNotEmpty, IsString} from 'class-validator';
+
+export class CreateRoleDto {
+  @IsNotEmpty()
+  @IsString()
+  name: string;
+}
+```
+
+### DTO для оновлення ролі
+
+```ts
+import { IsOptional, IsString } from 'class-validator';
+
+export class UpdateRoleDto {
+  @IsOptional()
+  @IsString()
+  name: string;
+}
+```
+
+### Pipes для валідації даних і обробки помилок клієнта
+
+```ts
+import { PipeTransform, Injectable, NotFoundException } from '@nestjs/common';
+import { RoleRepository } from './RoleRepository';
+
+@Injectable()
+export class RoleByIdPipe implements PipeTransform {
+  constructor (
+    private readonly roleRepository: RoleRepository,
+  ) {}
+
+  async transform(roleId: string) {
+    const role = await this.roleRepository.findById(roleId);
+
+    if (!role) throw new NotFoundException('Role with such id is not found');
+    return roleId;
+  }
+}
+```
+
+### Головний модуль програми
+
+```ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  app.useGlobalPipes(new ValidationPipe());
+
+  await app.listen(3000);
+}
+bootstrap();
 ```
